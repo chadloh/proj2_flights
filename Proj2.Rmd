@@ -7,9 +7,6 @@ output: html_document
 
 
 
-
-
-
 ```{r import libraries}
 library(tidyverse)
 library(readr)
@@ -67,6 +64,8 @@ flights_pair <-
   left_join(airlines[c(1,4)], by = c("carrier"="IATA.Code")) %>%
   rename(carrier_name = Short.Name)
 ```
+
+
 ```{r making paths}
 port1_sp <- SpatialPoints(coords = cbind(flights_pair$port1_lon, flights_pair$port1_lat),
 proj4string = CRS("+init=epsg:4326"))
