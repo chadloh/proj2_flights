@@ -1,0 +1,225 @@
+---
+title: "proj2"
+author: "Chad Loh"
+date: '2022-04-29'
+output: html_document
+---
+
+
+
+
+
+
+```{r import libraries}
+library(tidyverse)
+library(readr)
+library(maps)
+library(sp)
+# library(raster)
+library(geosphere)
+# library(leaflet)
+```
+
+
+```{r import data}
+airfare         <- read.csv("data/airfare.csv")
+airlines        <- read.csv('data/airlines.csv')
+airports_wiki_raw<- read.csv('data/airports_wiki.csv')[c(4,5,6,13,14,17,22)]
+airports_enplanements <- read.csv('data/airports_enplanements.csv')
+flights         <- read.csv('data/flights.asc', 
+                            sep = '|', header = F)[c(1,2,3,7,11,13,14,16)]
+colnames(flights) <- c('year', 'month', 'org', 'des', 
+                       'carrier', 'grp', 'dist', 'pass')
+
+# s <- shapefile("data/states_21basic/states.shp")
+
+```
+
+```{r adjust alaska and hawaii}
+
+airports_wiki <- 
+  airports_wiki_raw %>%
+  mutate(lat = case_when(local_region == 'AK' ~ latitude_deg-15,
+                         local_region == 'HI' ~ latitude_deg+15,
+                         TRUE ~ latitude_deg),
+         lon = case_when(local_region == 'AK' ~ longitude_deg+15,
+                         local_region == 'HI' ~ longitude_deg+25,
+                         TRUE ~ longitude_deg))
+```
+
+
+```{r cleaning data}
+flights_pair <- 
+  flights %>%
+  mutate(pair = ifelse(org<des, paste0(org,'-',des), paste0(des,'-',org))) %>%
+  group_by(pair, carrier) %>%
+  summarise(dist = mean(dist), pass=sum(pass)) %>%
+  arrange(desc(pass)) %>%
+  filter(pass > 400000) %>%
+  mutate(port1 = substr(pair,1,3), port2 = substr(pair,5,7)) %>%
+# join with airports_wiki data for longitude and latitude
+  left_join(airports_wiki[c(6,8,9)], by = c("port1" = "iata_code")) %>%
+  rename(port1_lat = lat, port1_lon = lon) %>%
+  left_join(airports_wiki[c(6,8,9)], by = c("port2" = "iata_code")) %>%
+  rename(port2_lat = lat, port2_lon = lon) %>%
+  filter(!any(is.na(port1_lat), is.na(port1_lon), is.na(port2_lat), is.na(port2_lon))) %>%
+# join with airlines 
+  left_join(airlines[c(1,4)], by = c("carrier"="IATA.Code")) %>%
+  rename(carrier_name = Short.Name)
+```
+```{r making paths}
+port1_sp <- SpatialPoints(coords = cbind(flights_pair$port1_lon, flights_pair$port1_lat),
+proj4string = CRS("+init=epsg:4326"))
+port2_sp <- SpatialPoints(coords = cbind(flights_pair$port2_lon, flights_pair$port2_lat),
+proj4string = CRS("+init=epsg:4326"))
+
+
+connection = function(lon1, lat1, lon2, lat2, group) {
+  inter <- gcIntermediate(c(lon1, lat1), c(lon2, lat2), n=50, addStartEnd=TRUE, breakAtDateLine=F) %>% data.frame
+  inter$group=group
+  return(inter)
+}
+
+df_plot <- data.frame()
+
+for(i in 1:nrow(flights_pair)){
+  tmp = connection(flights_pair$port1_lon[i], flights_pair$port1_lat[i], 
+                   flights_pair$port2_lon[i], flights_pair$port2_lat[i], i)
+  tmp$pair <- flights_pair$pair[i]
+  tmp$port1 <- flights_pair$port1[i]
+  tmp$port2 <- flights_pair$port2[i]
+  tmp$carrier <- flights_pair$carrier_name[i]
+  tmp$pass <- flights_pair$pass[i]
+  df_plot=rbind(df_plot, tmp)
+}
+
+summary(flights_pair)
+```
+
+
+
+```{r}
+base_world <- map_data("state")
+p <- ggplot() + 
+  geom_polygon(data=base_world, aes(long, lat, group=group), fill="#77777730", color="white") + 
+  geom_line(data = df_plot, aes(lon, lat, group=group, color=carrier, alpha = pass, size = pass)) + 
+  scale_size(range = c(0, 1))+
+  scale_alpha(range = c(0.2, 0.5))
+
+p <- p + theme(axis.line=element_blank(),
+              axis.text.x=element_blank(),
+              axis.text.y=element_blank(),
+              axis.ticks=element_blank(),
+              axis.title.x=element_blank(),
+              axis.title.y=element_blank(),
+              panel.background=element_blank(),
+              panel.border=element_blank(),
+              panel.grid.major=element_blank(),
+              panel.grid.minor=element_blank(),
+              plot.background=element_blank(),
+              legend.position="bottom",
+              aspect.ratio = 0.4) 
+
+p + coord_fixed(xlim = c(-140, -65), ylim = c(23.5, 48.5))
+```
+
+
+```{r}
+library(maptools)
+library(rgeos)
+library(mapproj)
+library(grid)
+
+all_states <- fortify(s, region = "STATE_NAME")
+
+p <- ggplot() + geom_polygon( 
+  aes(x=long, y=lat, group = group, fill = as.numeric(as.factor(id))), 
+  colour="white", size = 0.25
+) + coord_map(projection="mercator") + 
+scale_fill_gradient(limits = c(1,50))
+
+p <-   p + theme(axis.line=element_blank(),
+            axis.text.x=element_blank(),
+            axis.text.y=element_blank(),
+            axis.ticks=element_blank(),
+            axis.title.x=element_blank(),
+            axis.title.y=element_blank(),
+            panel.background=element_blank(),
+            panel.border=element_blank(),
+            panel.grid.major=element_blank(),
+            panel.grid.minor=element_blank(),
+            plot.background=element_blank())
+
+AK <- p %+% subset(all_states, id == "Alaska") + theme(legend.position = "none")
+HI <- p %+% subset(all_states, id == "Hawaii") + theme(legend.position = "none")
+contiguous <- p %+% subset(all_states, id != "Alaska" & id != "Hawaii")
+
+
+p <- p + geom_path(data = path, aes(lon, lat))
+
+grid.newpage()
+vp <- viewport(width = 1, height = 1, x = 0.75)
+print(contiguous, vp = vp)
+subvp1 <- viewport(width = 0.35, height = 0.35, x = 0.15, y = 0.63)
+print(AK, vp = subvp1)
+subvp2 <- viewport(width = 0.15, height = 0.15, x = 0.15, y = 0.30)
+print(HI, vp = subvp2)
+
+
+```
+
+
+```{r}
+library(fiftystater)
+library(sf)
+crimes <- data.frame(state = tolower(rownames(USArrests)), USArrests)
+
+# map_id creates the aesthetic mapping to the state name column in your data
+p <- ggplot(crimes, aes(map_id = state)) + 
+  # map points to the fifty_states shape data
+  geom_map(aes(fill = Assault), map = fifty_states) + 
+  expand_limits(x = fifty_states$long, y = fifty_states$lat) +
+  coord_map() +
+  scale_x_continuous(breaks = NULL) + 
+  scale_y_continuous(breaks = NULL) +
+  labs(x = "", y = "") +
+  theme(legend.position = "bottom", 
+        panel.background = element_blank())
+
+p
+```
+
+
+```{r}
+
+all_states <- fortify(s, region = "STATE_NAME")
+
+p <- ggplot() + geom_polygon( 
+  aes(x=long, y=lat, group = group, fill = as.numeric(as.factor(id))), 
+  colour="white", size = 0.25
+) + coord_map(projection="mercator") + 
+scale_fill_gradient(limits = c(1,50))
+
+p <-   p + theme(axis.line=element_blank(),
+            axis.text.x=element_blank(),
+            axis.text.y=element_blank(),
+            axis.ticks=element_blank(),
+            axis.title.x=element_blank(),
+            axis.title.y=element_blank(),
+            panel.background=element_blank(),
+            panel.border=element_blank(),
+            panel.grid.major=element_blank(),
+            panel.grid.minor=element_blank(),
+            plot.background=element_blank())
+
+contiguous <- p %+% subset(all_states, T)
+grid.newpage()
+vp <- viewport(width = 1, height = 1, x = 0.75)
+print(contiguous, vp = vp)
+```
+
+
+```{r}
+
+```
+
