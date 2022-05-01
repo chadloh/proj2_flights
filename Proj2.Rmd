@@ -9,35 +9,60 @@ output: html_document
 
 ```{r import libraries}
 library(tidyverse)
-library(readr)
 library(maps)
 library(sp)
-# library(raster)
+library(grid)
+library(ggrepel)
+library(png)
+library(svglite)
+library(cowplot)
 library(geosphere)
 # library(leaflet)
+# library(raster)
+```
+
+Reading the cleaned data
+
+```{r}
+flights_pair = read.csv("flights_pair.csv")
+airports = read.csv("airports.csv")
+paths = read.csv("paths.csv")
+fare_pair = read.csv("fare_pair.csv")
+cities = read.csv("cities.csv")
+fares = read.csv("fares.csv")
+base_world <- map_data("state")
+airline_color = c('#777EBD', '#F1F2F2', '#ED0000', '#45CC33', '#BF00CC', 
+                  '#47CCFF', '#4FCCD7', '#FFCC00', '#FFFF00', '#005EFF')
+airline_name = c('Alaska', 'American', 'Delta', 'Frontier', 'Hawaiian',
+                 'Jetblue', 'Skywest', 'Southwest', 'Spirit', 'United')
+
+#connection function
+connection = function(lon1, lat1, lon2, lat2, group) {
+  inter <- gcIntermediate(c(lon1, lat1), c(lon2, lat2), n=50, addStartEnd=TRUE, breakAtDateLine=F) %>% data.frame
+  inter$group=group
+  return(inter)
+}
 ```
 
 
+Importing the raw data
+
 ```{r import data}
-airfare         <- read.csv("data/airfare.csv")
+airfare_raw     <- read.csv("data/airfare_full.csv")
 airlines        <- read.csv('data/airlines.csv')
 airports_wiki_raw<- read.csv('data/airports_wiki.csv')[c(4,5,6,13,14,17,22)]
 airports_enplanements <- read.csv('data/airports_enplanements.csv')
 flights         <- read.csv('data/flights.asc', 
                             sep = '|', header = F)[c(1,2,3,7,11,13,14,16)]
+airport_city <- read.csv('data/airport_city.csv')
 colnames(flights) <- c('year', 'month', 'org', 'des', 
                        'carrier', 'grp', 'dist', 'pass')
 
-# s <- shapefile("data/states_21basic/states.shp")
-
-```
-
-```{r adjust alaska and hawaii}
-
+#adjust alaska and hawaii location
 airports_wiki <- 
   airports_wiki_raw %>%
-  mutate(lat = case_when(local_region == 'AK' ~ latitude_deg-15,
-                         local_region == 'HI' ~ latitude_deg+15,
+  mutate(lat = case_when(local_region == 'AK' ~ latitude_deg-20,
+                         local_region == 'HI' ~ latitude_deg+10,
                          TRUE ~ latitude_deg),
          lon = case_when(local_region == 'AK' ~ longitude_deg+15,
                          local_region == 'HI' ~ longitude_deg+25,
@@ -45,14 +70,15 @@ airports_wiki <-
 ```
 
 
-```{r cleaning data}
+```{r cleaning data for the flight plots}
+
 flights_pair <- 
   flights %>%
   mutate(pair = ifelse(org<des, paste0(org,'-',des), paste0(des,'-',org))) %>%
   group_by(pair, carrier) %>%
   summarise(dist = mean(dist), pass=sum(pass)) %>%
   arrange(desc(pass)) %>%
-  filter(pass > 400000) %>%
+  filter(pass > 100000) %>%
   mutate(port1 = substr(pair,1,3), port2 = substr(pair,5,7)) %>%
 # join with airports_wiki data for longitude and latitude
   left_join(airports_wiki[c(6,8,9)], by = c("port1" = "iata_code")) %>%
@@ -61,25 +87,99 @@ flights_pair <-
   rename(port2_lat = lat, port2_lon = lon) %>%
   filter(!any(is.na(port1_lat), is.na(port1_lon), is.na(port2_lat), is.na(port2_lon))) %>%
 # join with airlines 
-  left_join(airlines[c(1,4)], by = c("carrier"="IATA.Code")) %>%
-  rename(carrier_name = Short.Name)
+  left_join(airlines[c(1,4,5)], by = c("carrier"="IATA.Code")) %>%
+  rename(carrier_name = Short.Name) %>%
+  filter(carrier_name %in% airline_name)
+
+#find airport list with flights with more than 500000 passengers
+airports <-
+flights_pair %>%
+  ungroup() %>%
+  filter(pass > 500000) %>%
+  pivot_longer(cols = c(port1, port2), names_to = "temp", values_to = "ports") %>%
+  select(ports) %>%
+  distinct() %>%
+# get coordinates and enplanement data
+  left_join(airports_wiki[c(6,8,9)], by = c("ports" = "iata_code")) %>%
+  left_join(airports_enplanements[c(4,8)], by= c("ports" = "IATA")) %>%
+  mutate(Enplanements = as.numeric(gsub(",","",Enplanements)))
+
 ```
 
 
-```{r making paths}
-port1_sp <- SpatialPoints(coords = cbind(flights_pair$port1_lon, flights_pair$port1_lat),
-proj4string = CRS("+init=epsg:4326"))
-port2_sp <- SpatialPoints(coords = cbind(flights_pair$port2_lon, flights_pair$port2_lat),
-proj4string = CRS("+init=epsg:4326"))
+
+```{r cleaning data for the fare plots}
+
+airfare <-
+  airfare_raw %>%
+  filter(Year == 2021 & passengers>250) %>%
+  mutate(city1 = gsub("Metropolitan Area", "", city1), 
+         city1 = gsub("[()]", "", city1), 
+         city1 = trimws(city1, which = "both", whitespace = "[ \t\r\n]")) %>%
+  mutate(city2 = gsub("Metropolitan Area", "", city2), 
+         city2 = gsub("[()]", "", city2), 
+         city2 = trimws(city2, which = "both", whitespace = "[ \t\r\n]")) %>%
+  select(c("city1", "city2", "nsmiles", "passengers", "fare")) %>%
+  arrange(city1)
+
+uscitylist <- airfare %>%
+  gather(key = "od", value = "City", city1, city2) %>%
+  distinct(City)
+  
+
+#making the list of airports that represents the city
+
+rep <- 
+  uscitylist %>% 
+  left_join(airports[1] %>% left_join(airport_city[1:2], by = c("ports" = "Code")), by = c("City" = "City"))
+temp <-
+  rep[is.na(rep$ports),] %>% 
+  left_join(airport_city[1:2], by = c("City" = "City")) %>%
+  mutate(ports = Code) %>%
+  select(-Code) %>%
+  select(City, ports) %>%
+  group_by(City) %>%
+  summarise(ports = first(ports))
+
+rep <-
+  rep %>% 
+  left_join(temp, by=("City" = "City")) %>% 
+  mutate(port = coalesce(ports.x, ports.y)) %>% 
+  select(City, port) %>%
+  left_join(airports_wiki[c(6,8,9)], by = c("port" = "iata_code")) %>%
+  filter(!is.na(lat)) %>%
+  group_by(City) %>%
+  filter(row_number()==1) %>%
+  arrange(City)
+
+fare_pair <-
+  airfare %>%
+  group_by(city1, city2) %>%
+  summarise(nsmiles = mean(nsmiles), passengers_sum = sum(passengers), fare_mean = weighted.mean(fare,passengers)) %>%
+# join with airports_wiki data for longitude and latitude
+  left_join(rep[c(1,3,4)], by = c("city1" = "City")) %>%
+  rename(port1_lat = lat, port1_lon = lon) %>%
+  left_join(rep[c(1,3,4)], by = c("city2" = "City"))  %>%
+  rename(port2_lat = lat, port2_lon = lon) %>%
+  na.omit()
+
+cities <-
+  fare_pair %>%
+  ungroup() %>%
+  filter(passengers_sum > 3000) %>%
+  pivot_longer(cols = c(city1, city2), names_to = "temp", values_to = "cities") %>%
+  select(cities) %>%
+  distinct() %>%
+  left_join(rep[c(1,3,4)], by = c("cities" = "City"))
+```
 
 
-connection = function(lon1, lat1, lon2, lat2, group) {
-  inter <- gcIntermediate(c(lon1, lat1), c(lon2, lat2), n=50, addStartEnd=TRUE, breakAtDateLine=F) %>% data.frame
-  inter$group=group
-  return(inter)
-}
+```{r making paths for flights}
 
-df_plot <- data.frame()
+port1_sp <- SpatialPoints(coords = cbind(flights_pair$port1_lon, flights_pair$port1_lat), proj4string = CRS("+init=epsg:4326"))
+port2_sp <- SpatialPoints(coords = cbind(flights_pair$port2_lon, flights_pair$port2_lat), proj4string = CRS("+init=epsg:4326"))
+
+paths <- data.frame()
 
 for(i in 1:nrow(flights_pair)){
   tmp = connection(flights_pair$port1_lon[i], flights_pair$port1_lat[i], 
@@ -89,136 +189,143 @@ for(i in 1:nrow(flights_pair)){
   tmp$port2 <- flights_pair$port2[i]
   tmp$carrier <- flights_pair$carrier_name[i]
   tmp$pass <- flights_pair$pass[i]
-  df_plot=rbind(df_plot, tmp)
+  paths=rbind(paths, tmp)
 }
 
-summary(flights_pair)
+```
+
+
+```{r making paths for fare}
+
+city1_sp <- SpatialPoints(coords = cbind(fare_pair$port1_lon, fare_pair$port1_lat), proj4string = CRS("+init=epsg:4326"))
+city2_sp <- SpatialPoints(coords = cbind(fare_pair$port2_lon, fare_pair$port2_lat), proj4string = CRS("+init=epsg:4326"))
+
+fares <- data.frame()
+
+for(i in 1:nrow(fare_pair)){
+  tmp = connection(fare_pair$port1_lon[i], fare_pair$port1_lat[i], 
+                   fare_pair$port2_lon[i], fare_pair$port2_lat[i], i)
+  tmp$city1 <- fare_pair$city1[i]
+  tmp$city2 <- fare_pair$city2[i]
+  tmp$pass <- fare_pair$passengers_sum[i]
+  tmp$fare <- fare_pair$fare_mean[i]
+  tmp$income <- fare_pair$fare_mean[i]*fare_pair$passengers_sum[i]
+  tmp$fare.per.miles <- fare_pair$fare_mean[i]/fare_pair$nsmiles[i]
+  fares=rbind(fares, tmp)
+}
+
+```
+
+Save data as csv files
+
+```{r}
+write.csv(flights_pair,"flights_pair.csv", row.names = FALSE)
+write.csv(airports,"airports.csv", row.names = FALSE)
+write.csv(paths,"paths.csv", row.names = FALSE)
+write.csv(fare_pair,"fare_pair.csv", row.names = FALSE)
+write.csv(cities,"cities.csv", row.names = FALSE)
+write.csv(fares,"fares.csv", row.names = FALSE)
+
 ```
 
 
 
 ```{r}
-base_world <- map_data("state")
+# airline_legend <- data.frame(c('img/airlines-12.png'))
+airline_legend <- readPNG('img/airlines-12.png')
+
+airlines = c('Alaska', 'American', 'Delta', 'Frontier', 'Hawaiian', 'Jetblue', 'Skywest', 'Southwest', 'Spirit', 'United')
+
+category = c("pass", "price", "money")[1]
+ 
+catlimit = data.frame(c(100000,1500000), c(0, 500), c(0, 1000000000))[,1]
+
 p <- ggplot() + 
-  geom_polygon(data=base_world, aes(long, lat, group=group), fill="#77777730", color="white") + 
-  geom_line(data = df_plot, aes(lon, lat, group=group, color=carrier, alpha = pass, size = pass)) + 
-  scale_size(range = c(0, 1))+
-  scale_alpha(range = c(0.2, 0.5))
+  geom_polygon(data=base_world, aes(long, lat, group=group), fill="#ffffff11", color="#ffffff22") + 
+  geom_line(data = paths %>% filter(carrier %in% airlines), aes(lon, lat, group=group, color=carrier, alpha = pass, size = pass)) + 
+  geom_point(data = airports, aes(lon, lat), size=2, fill="#cccccc", color = "#eeeeee") +
+  geom_text_repel(data = airports, aes(lon, lat, label=ports), size=2.5, color = "#cccccc") +
+  scale_size("line", range = c(0.15, 0.85), limits = c(100000,1500000)) +
+  scale_alpha(range = c(0.15, 0.75)) +
+  scale_color_manual(values=airline_color[airline_name %in% airlines]) +
+  coord_fixed(xlim = c(-140, -65), ylim = c(20, 50)) +
+  theme(axis.line=element_blank(),
+        axis.text.x=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks=element_blank(),
+        axis.title.x=element_blank(),
+        axis.title.y=element_blank(),
+        panel.background=element_rect(fill='transparent'),
+        plot.background = element_rect(fill='#111111', color=NA), 
+        panel.border=element_blank(),
+        panel.grid.major=element_blank(),
+        panel.grid.minor=element_blank(),
+        legend.position="none",
+        aspect.ratio = 0.5)
 
-p <- p + theme(axis.line=element_blank(),
-              axis.text.x=element_blank(),
-              axis.text.y=element_blank(),
-              axis.ticks=element_blank(),
-              axis.title.x=element_blank(),
-              axis.title.y=element_blank(),
-              panel.background=element_blank(),
-              panel.border=element_blank(),
-              panel.grid.major=element_blank(),
-              panel.grid.minor=element_blank(),
-              plot.background=element_blank(),
-              legend.position="bottom",
-              aspect.ratio = 0.4) 
+ggdraw(p) + 
+  draw_image('img/airlines-12.png', x = 0.15, y=-0.4, width = 0.7)
 
-p + coord_fixed(xlim = c(-140, -65), ylim = c(23.5, 48.5))
+ggsave("flights.svg",plot = p, height=9, width=12,dpi=300)
 ```
 
 
 ```{r}
-library(maptools)
-library(rgeos)
-library(mapproj)
-library(grid)
+p2 <- ggplot() + 
+  geom_polygon(data=base_world, aes(long, lat, group=group), fill="#ffffff11", color="#ffffff22") + 
+  geom_line(data = fares, aes(lon, lat, group=group, color=fare, alpha = fare, size = income)) + 
+  geom_point(data = cities, aes(lon, lat), size=2, fill="#cccccc", color = "#eeeeee") +
+  geom_text_repel(data = cities, aes(lon, lat, label=cities), size=2.5, color = "#cccccc") +
+  scale_size("line", range = c(0, 0.85)) +
+  scale_color_viridis_c(option = "magma") +
+  scale_alpha(range = c(0.25, 0.75)) +
+  coord_fixed(xlim = c(-140, -65), ylim = c(20, 50)) +
+  theme(axis.line=element_blank(),
+        axis.text.x=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks=element_blank(),
+        axis.title.x=element_blank(),
+        axis.title.y=element_blank(),
+        panel.background=element_rect(fill='transparent'),
+        plot.background = element_rect(fill='#111111', color=NA), 
+        panel.border=element_blank(),
+        panel.grid.major=element_blank(),
+        panel.grid.minor=element_blank(),
+        legend.position="bottom",
+        aspect.ratio = 0.5)
 
-all_states <- fortify(s, region = "STATE_NAME")
+ggdraw(p2)
 
-p <- ggplot() + geom_polygon( 
-  aes(x=long, y=lat, group = group, fill = as.numeric(as.factor(id))), 
-  colour="white", size = 0.25
-) + coord_map(projection="mercator") + 
-scale_fill_gradient(limits = c(1,50))
-
-p <-   p + theme(axis.line=element_blank(),
-            axis.text.x=element_blank(),
-            axis.text.y=element_blank(),
-            axis.ticks=element_blank(),
-            axis.title.x=element_blank(),
-            axis.title.y=element_blank(),
-            panel.background=element_blank(),
-            panel.border=element_blank(),
-            panel.grid.major=element_blank(),
-            panel.grid.minor=element_blank(),
-            plot.background=element_blank())
-
-AK <- p %+% subset(all_states, id == "Alaska") + theme(legend.position = "none")
-HI <- p %+% subset(all_states, id == "Hawaii") + theme(legend.position = "none")
-contiguous <- p %+% subset(all_states, id != "Alaska" & id != "Hawaii")
-
-
-p <- p + geom_path(data = path, aes(lon, lat))
-
-grid.newpage()
-vp <- viewport(width = 1, height = 1, x = 0.75)
-print(contiguous, vp = vp)
-subvp1 <- viewport(width = 0.35, height = 0.35, x = 0.15, y = 0.63)
-print(AK, vp = subvp1)
-subvp2 <- viewport(width = 0.15, height = 0.15, x = 0.15, y = 0.30)
-print(HI, vp = subvp2)
-
-
+ggsave("fare.svg",plot = p2, height=9, width=12,dpi=300)
 ```
 
 
 ```{r}
-library(fiftystater)
-library(sf)
-crimes <- data.frame(state = tolower(rownames(USArrests)), USArrests)
+p3 <- ggplot() + 
+  geom_polygon(data=base_world, aes(long, lat, group=group), fill="#ffffff11", color="#ffffff22") + 
+  geom_line(data = fares, aes(lon, lat, group=group, color=income, alpha = income, size = income)) + 
+  geom_point(data = cities, aes(lon, lat), size=2, fill="#cccccc", color = "#eeeeee") +
+  geom_text_repel(data = cities, aes(lon, lat, label=cities), size=2.5, color = "#cccccc") +
+  scale_size("line", range = c(0, 0.85)) +
+  scale_color_viridis_c(option = "magma") +
+  scale_alpha(range = c(0.25, 0.75)) +
+  coord_fixed(xlim = c(-140, -65), ylim = c(20, 50)) +
+  theme(axis.line=element_blank(),
+        axis.text.x=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks=element_blank(),
+        axis.title.x=element_blank(),
+        axis.title.y=element_blank(),
+        panel.background=element_rect(fill='transparent'),
+        plot.background = element_rect(fill='#111111', color=NA), 
+        panel.border=element_blank(),
+        panel.grid.major=element_blank(),
+        panel.grid.minor=element_blank(),
+        legend.position="bottom",
+        aspect.ratio = 0.5)
 
-# map_id creates the aesthetic mapping to the state name column in your data
-p <- ggplot(crimes, aes(map_id = state)) + 
-  # map points to the fifty_states shape data
-  geom_map(aes(fill = Assault), map = fifty_states) + 
-  expand_limits(x = fifty_states$long, y = fifty_states$lat) +
-  coord_map() +
-  scale_x_continuous(breaks = NULL) + 
-  scale_y_continuous(breaks = NULL) +
-  labs(x = "", y = "") +
-  theme(legend.position = "bottom", 
-        panel.background = element_blank())
+ggdraw(p3)
 
-p
-```
-
-
-```{r}
-
-all_states <- fortify(s, region = "STATE_NAME")
-
-p <- ggplot() + geom_polygon( 
-  aes(x=long, y=lat, group = group, fill = as.numeric(as.factor(id))), 
-  colour="white", size = 0.25
-) + coord_map(projection="mercator") + 
-scale_fill_gradient(limits = c(1,50))
-
-p <-   p + theme(axis.line=element_blank(),
-            axis.text.x=element_blank(),
-            axis.text.y=element_blank(),
-            axis.ticks=element_blank(),
-            axis.title.x=element_blank(),
-            axis.title.y=element_blank(),
-            panel.background=element_blank(),
-            panel.border=element_blank(),
-            panel.grid.major=element_blank(),
-            panel.grid.minor=element_blank(),
-            plot.background=element_blank())
-
-contiguous <- p %+% subset(all_states, T)
-grid.newpage()
-vp <- viewport(width = 1, height = 1, x = 0.75)
-print(contiguous, vp = vp)
-```
-
-
-```{r}
-
+ggsave("income.svg",plot = p2, height=9, width=12,dpi=300)
 ```
 
