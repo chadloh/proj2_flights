@@ -30,6 +30,8 @@ paths = read.csv("paths.csv")
 fare_pair = read.csv("fare_pair.csv")
 cities = read.csv("cities.csv")
 fares = read.csv("fares.csv")
+ppm_df = read.csv("ppm_df.csv")
+
 base_world <- map_data("state")
 airline_color = c('#777EBD', '#F1F2F2', '#ED0000', '#45CC33', '#BF00CC', 
                   '#47CCFF', '#4FCCD7', '#FFCC00', '#FFFF00', '#005EFF')
@@ -216,6 +218,36 @@ for(i in 1:nrow(fare_pair)){
 
 ```
 
+
+Statistics
+
+```{r price per miles}
+# ppm_df <-
+flights_pair %>%
+  left_join(airport_city[c(1,2)], by = c("port1" = "Code")) %>%
+  rename(city1 = City) %>%
+  left_join(airport_city[c(1,2)], by = c("port2" = "Code")) %>%
+  rename(city2 = City) %>%
+  left_join(fare_pair[1:5], by = c("city1" = "city1", "city2" = "city2")) %>%
+  left_join(fare_pair[1:5], by = c("city1" = "city2", "city2" = "city1")) %>%
+  mutate(nsmiles = coalesce(nsmiles.x, nsmiles.y)) %>% 
+  mutate(passengers_sum = coalesce(passengers_sum.x, passengers_sum.y)) %>% 
+  mutate(fare_mean = coalesce(fare_mean.x, fare_mean.y)) %>% 
+  select(-nsmiles.x, -nsmiles.y, 
+         -passengers_sum.x, -passengers_sum.y, 
+         -fare_mean.x, -fare_mean.y) %>%
+  na.omit() %>%
+  left_join(airlines[c(1,6)], by =c("carrier" = "IATA.Code")) %>%
+  mutate(hub = grepl(port1, Hubs) | grepl(port2, Hubs))
+
+```
+```{r}
+strsplit(Hubs, ",")
+```
+
+
+
+
 Save data as csv files
 
 ```{r}
@@ -225,6 +257,7 @@ write.csv(paths,"paths.csv", row.names = FALSE)
 write.csv(fare_pair,"fare_pair.csv", row.names = FALSE)
 write.csv(cities,"cities.csv", row.names = FALSE)
 write.csv(fares,"fares.csv", row.names = FALSE)
+write.csv(ppm_df,"ppm_df.csv", row.names = FALSE)
 
 ```
 
@@ -306,9 +339,9 @@ p3 <- ggplot() +
   geom_line(data = fares, aes(lon, lat, group=group, color=income, alpha = income, size = income)) + 
   geom_point(data = cities, aes(lon, lat), size=2, fill="#cccccc", color = "#eeeeee") +
   geom_text_repel(data = cities, aes(lon, lat, label=cities), size=2.5, color = "#cccccc") +
-  scale_size("line", range = c(0, 0.85)) +
-  scale_color_viridis_c(option = "magma") +
-  scale_alpha(range = c(0.25, 0.75)) +
+  scale_size("line", range = c(0, 0.85), trans='log10') +
+  scale_color_viridis_c(option = "mako", limits = c(0, 5000000)) +
+  scale_alpha(range = c(0.25, 1), limits = c(0, 5000000)) +
   coord_fixed(xlim = c(-140, -65), ylim = c(20, 50)) +
   theme(axis.line=element_blank(),
         axis.text.x=element_blank(),
@@ -326,6 +359,6 @@ p3 <- ggplot() +
 
 ggdraw(p3)
 
-ggsave("income.svg",plot = p2, height=9, width=12,dpi=300)
+ggsave("income.svg",plot = p3, height=9, width=12,dpi=300)
 ```
 
