@@ -19,6 +19,22 @@ library(cowplot)
 library(geosphere)
 # library(leaflet)
 # library(raster)
+
+
+base_world <- map_data("state")
+airline_color = c('#777EBD', '#F1F2F2', '#ED0000', '#45CC33', '#BF00CC', 
+                  '#47CCFF', '#4FCCD7', '#FFCC00', '#FFFF00', '#005EFF')
+airline_name = c('Alaska', 'American', 'Delta', 'Frontier', 'Hawaiian',
+                 'Jetblue', 'Skywest', 'Southwest', 'Spirit', 'United')
+
+
+#connection function
+connection = function(lon1, lat1, lon2, lat2, group) {
+  inter <- gcIntermediate(c(lon1, lat1), c(lon2, lat2), n=50, addStartEnd=TRUE, breakAtDateLine=F) %>% data.frame
+  inter$group=group
+  return(inter)
+}
+
 ```
 
 Reading the cleaned data
@@ -32,18 +48,6 @@ cities = read.csv("cities.csv")
 fares = read.csv("fares.csv")
 ppm_df = read.csv("ppm_df.csv")
 
-base_world <- map_data("state")
-airline_color = c('#777EBD', '#F1F2F2', '#ED0000', '#45CC33', '#BF00CC', 
-                  '#47CCFF', '#4FCCD7', '#FFCC00', '#FFFF00', '#005EFF')
-airline_name = c('Alaska', 'American', 'Delta', 'Frontier', 'Hawaiian',
-                 'Jetblue', 'Skywest', 'Southwest', 'Spirit', 'United')
-
-#connection function
-connection = function(lon1, lat1, lon2, lat2, group) {
-  inter <- gcIntermediate(c(lon1, lat1), c(lon2, lat2), n=50, addStartEnd=TRUE, breakAtDateLine=F) %>% data.frame
-  inter$group=group
-  return(inter)
-}
 ```
 
 
@@ -55,7 +59,7 @@ airlines        <- read.csv('data/airlines.csv')
 airports_wiki_raw<- read.csv('data/airports_wiki.csv')[c(4,5,6,13,14,17,22)]
 airports_enplanements <- read.csv('data/airports_enplanements.csv')
 flights         <- read.csv('data/flights.asc', 
-                            sep = '|', header = F)[c(1,2,3,7,11,13,14,16)]
+                sep = '|', header = F)[c(1,2,3,7,11,13,14,16)]
 airport_city <- read.csv('data/airport_city.csv')
 colnames(flights) <- c('year', 'month', 'org', 'des', 
                        'carrier', 'grp', 'dist', 'pass')
@@ -69,6 +73,9 @@ airports_wiki <-
          lon = case_when(local_region == 'AK' ~ longitude_deg+15,
                          local_region == 'HI' ~ longitude_deg+25,
                          TRUE ~ longitude_deg))
+airlines <-
+  airlines %>% 
+  mutate(Hubs = strsplit(Hubs,","))
 ```
 
 
@@ -222,8 +229,21 @@ for(i in 1:nrow(fare_pair)){
 Statistics
 
 ```{r price per miles}
-# ppm_df <-
-flights_pair %>%
+
+flights_pair2 <- 
+  flights %>%
+  mutate(pair = ifelse(org<des, paste0(org,'-',des), paste0(des,'-',org))) %>%
+  group_by(pair, carrier) %>%
+  summarise(dist = mean(dist), pass=sum(pass)) %>%
+  arrange(desc(pass)) %>%
+  mutate(port1 = substr(pair,1,3), port2 = substr(pair,5,7)) %>%
+# join with airlines 
+  left_join(airlines[c(1,4,5)], by = c("carrier"="IATA.Code")) %>%
+  rename(carrier_name = Short.Name) %>%
+  filter(carrier_name %in% airline_name)
+
+ppm_df <-
+flights_pair2 %>%
   left_join(airport_city[c(1,2)], by = c("port1" = "Code")) %>%
   rename(city1 = City) %>%
   left_join(airport_city[c(1,2)], by = c("port2" = "Code")) %>%
@@ -233,16 +253,54 @@ flights_pair %>%
   mutate(nsmiles = coalesce(nsmiles.x, nsmiles.y)) %>% 
   mutate(passengers_sum = coalesce(passengers_sum.x, passengers_sum.y)) %>% 
   mutate(fare_mean = coalesce(fare_mean.x, fare_mean.y)) %>% 
+  mutate(ppm = fare_mean/nsmiles) %>% 
   select(-nsmiles.x, -nsmiles.y, 
          -passengers_sum.x, -passengers_sum.y, 
          -fare_mean.x, -fare_mean.y) %>%
-  na.omit() %>%
-  left_join(airlines[c(1,6)], by =c("carrier" = "IATA.Code")) %>%
-  mutate(hub = grepl(port1, Hubs) | grepl(port2, Hubs))
+  na.omit()
+
+for(i in 1:nrow(ppm_df)){
+  ppm_df$Hubs[i] = grepl(ppm_df$port1[i], ppm_df$Hubs[i]) | grepl(ppm_df$port2[i], ppm_df$Hubs[i]) 
+}
+
+ppm_df <-
+  ppm_df %>%
+  mutate(Hubs = ifelse(Hubs,"Hub flight", "Not a hub flight"))
 
 ```
+
+
+
 ```{r}
-strsplit(Hubs, ",")
+# ppm_plot
+
+
+ggplot(data = ppm_df, aes(x = dist, y = fare_mean, color = carrier_name)) +
+  geom_point(alpha = 0.5) +
+  scale_color_manual(values=airline_color) + 
+  geom_smooth(method="lm", formula = y~x)+
+  theme(panel.background=element_rect(fill='transparent'),
+        plot.background = element_rect(fill='#111111', color=NA), 
+        panel.border=element_blank(),
+        panel.grid.major=element_line(color = "#444444"),
+        panel.grid.minor=element_blank(),
+        legend.position="bottom")
+  
+```
+
+
+```{r}
+# hub_plot
+  
+ggplot(ppm_df, aes(x=Hubs, y=ppm)) + 
+  geom_jitter(position=position_jitter(width=0.3), aes(color = carrier_name), alpha=0.25) +
+  geom_boxplot(alpha = 0.25, show.legend = FALSE, aes(fill=carrier_name)) +
+  facet_wrap(.~carrier_name, ncol = 5) +
+  theme(strip.text.x = element_text(size=9, color="black", face="bold")) + 
+  scale_color_manual(values=airline_color) + 
+  scale_fill_manual(values=airline_color) + 
+  guides(color=guide_legend("Airlines"))
+
 ```
 
 
