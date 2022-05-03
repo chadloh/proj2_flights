@@ -1,0 +1,209 @@
+[1] "Alaska"
+
+Call:
+lm(formula = fare ~ dist, data = ppm_df[ppm_df$carrier_name == 
+    airline_name[i], ])
+
+Residuals:
+    Min      1Q  Median      3Q     Max 
+-54.080 -18.750  -3.531  19.977  65.220 
+
+Coefficients:
+             Estimate Std. Error t value Pr(>|t|)    
+(Intercept) 115.33504    4.84121   23.82   <2e-16 ***
+dist          0.06206    0.00299   20.76   <2e-16 ***
+---
+Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+Residual standard error: 25.29 on 114 degrees of freedom
+Multiple R-squared:  0.7908,    Adjusted R-squared:  0.7889 
+F-statistic: 430.9 on 1 and 114 DF,  p-value: < 2.2e-16
+
+[1] "American"
+
+Call:
+lm(formula = fare ~ dist, data = ppm_df[ppm_df$carrier_name == 
+    airline_name[i], ])
+
+Residuals:
+    Min      1Q  Median      3Q     Max 
+-86.815 -22.112   3.194  19.583  85.241 
+
+Coefficients:
+             Estimate Std. Error t value Pr(>|t|)    
+(Intercept) 1.367e+02  3.293e+00   41.52   <2e-16 ***
+dist        5.463e-02  2.729e-03   20.02   <2e-16 ***
+---
+Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+Residual standard error: 29.89 on 341 degrees of freedom
+Multiple R-squared:  0.5403,    Adjusted R-squared:  0.5389 
+F-statistic: 400.7 on 1 and 341 DF,  p-value: < 2.2e-16
+
+[1] "Delta"
+
+Call:
+lm(formula = fare ~ dist, data = ppm_df[ppm_df$carrier_name == 
+    airline_name[i], ])
+
+Residuals:
+    Min      1Q  Median      3Q     Max 
+-75.387 -25.586   1.259  19.595 110.815 
+
+Coefficients:
+             Estimate Std. Error t value Pr(>|t|)    
+(Intercept) 1.360e+02  2.883e+00   47.18   <2e-16 ***
+dist        5.928e-02  2.322e-03   25.53   <2e-16 ***
+---
+Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+Residual standard error: 34.14 on 566 degrees of freedom
+Multiple R-squared:  0.5352,    Adjusted R-squared:  0.5344 
+F-statistic: 651.7 on 1 and 566 DF,  p-value: < 2.2e-16
+
+[1] "Frontier"
+
+Call:
+lm(formula = fare ~ dist, data = ppm_df[ppm_df$carrier_name == 
+    airline_name[i], ])
+
+Residuals:
+   Min     1Q Median     3Q    Max 
+-87.09 -34.18   1.73  28.59 125.96 
+
+Coefficients:
+             Estimate Std. Error t value Pr(>|t|)    
+(Intercept) 1.099e+02  7.096e+00  15.489  < 2e-16 ***
+dist        3.708e-02  6.601e-03   5.617 6.02e-08 ***
+---
+Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+Residual standard error: 40.89 on 213 degrees of freedom
+Multiple R-squared:  0.129, Adjusted R-squared:  0.1249 
+F-statistic: 31.55 on 1 and 213 DF,  p-value: 6.02e-08
+
+[1] "Hawaiian"
+
+Call:
+lm(formula = fare ~ dist, data = ppm_df[ppm_df$carrier_name == 
+    airline_name[i], ])
+
+Residuals:
+    Min      1Q  Median      3Q     Max 
+-59.321 -18.321  -5.956  20.240  56.002 
+
+Coefficients:
+             Estimate Std. Error t value Pr(>|t|)  
+(Intercept) 115.67611   37.23298   3.107   0.0209 *
+dist          0.05346    0.02703   1.978   0.0953 .
+---
+Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+Residual standard error: 42.98 on 6 degrees of freedom
+Multiple R-squared:  0.3947,    Adjusted R-squared:  0.2938 
+F-statistic: 3.912 on 1 and 6 DF,  p-value: 0.09531
+
+[1] "Jetblue"
+
+Call:
+lm(formula = fare ~ dist, data = ppm_df[ppm_df$carrier_name == 
+    airline_name[i], ])
+
+Residuals:
+    Min      1Q  Median      3Q     Max 
+-87.598 -28.557  -1.115  23.104 112.879 
+
+Coefficients:
+             Estimate Std. Error t value Pr(>|t|)    
+(Intercept) 1.341e+02  4.402e+00   30.47   <2e-16 ***
+dist        4.989e-02  3.371e-03   14.80   <2e-16 ***
+---
+Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+Residual standard error: 36.93 on 253 degrees of freedom
+Multiple R-squared:  0.464, Adjusted R-squared:  0.4619 
+F-statistic:   219 on 1 and 253 DF,  p-value: < 2.2e-16
+
+[1] "Skywest"
+
+Call:
+lm(formula = fare ~ dist, data = ppm_df[ppm_df$carrier_name == 
+    airline_name[i], ])
+
+Residuals:
+    Min      1Q  Median      3Q     Max 
+-66.909 -21.271  -0.892  15.705 149.656 
+
+Coefficients:
+             Estimate Std. Error t value Pr(>|t|)    
+(Intercept) 142.78207    4.47020   31.94   <2e-16 ***
+dist          0.05169    0.00487   10.61   <2e-16 ***
+---
+Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+Residual standard error: 31.12 on 268 degrees of freedom
+Multiple R-squared:  0.2959,    Adjusted R-squared:  0.2933 
+F-statistic: 112.7 on 1 and 268 DF,  p-value: < 2.2e-16
+
+[1] "Southwest"
+
+Call:
+lm(formula = fare ~ dist, data = ppm_df[ppm_df$carrier_name == 
+    airline_name[i], ])
+
+Residuals:
+     Min       1Q   Median       3Q      Max 
+-134.895  -15.895    0.595   18.050  101.552 
+
+Coefficients:
+             Estimate Std. Error t value Pr(>|t|)    
+(Intercept) 1.199e+02  2.141e+00   55.98   <2e-16 ***
+dist        5.873e-02  1.697e-03   34.61   <2e-16 ***
+---
+Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+Residual standard error: 29 on 811 degrees of freedom
+Multiple R-squared:  0.5963,    Adjusted R-squared:  0.5958 
+F-statistic:  1198 on 1 and 811 DF,  p-value: < 2.2e-16
+
+[1] "Spirit"
+
+Call:
+lm(formula = fare ~ dist, data = ppm_df[ppm_df$carrier_name == 
+    airline_name[i], ])
+
+Residuals:
+    Min      1Q  Median      3Q     Max 
+-74.590 -34.240  -0.108  29.388 132.597 
+
+Coefficients:
+             Estimate Std. Error t value Pr(>|t|)    
+(Intercept) 99.902414   7.503384  13.314  < 2e-16 ***
+dist         0.038460   0.006199   6.204 4.51e-09 ***
+---
+Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+Residual standard error: 39.84 on 160 degrees of freedom
+Multiple R-squared:  0.1939,    Adjusted R-squared:  0.1889 
+F-statistic:  38.5 on 1 and 160 DF,  p-value: 4.513e-09
+
+[1] "United"
+
+Call:
+lm(formula = fare ~ dist, data = ppm_df[ppm_df$carrier_name == 
+    airline_name[i], ])
+
+Residuals:
+    Min      1Q  Median      3Q     Max 
+-95.465 -26.059   2.182  23.203 140.126 
+
+Coefficients:
+             Estimate Std. Error t value Pr(>|t|)    
+(Intercept) 1.296e+02  3.076e+00   42.14   <2e-16 ***
+dist        6.544e-02  2.496e-03   26.21   <2e-16 ***
+---
+Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+Residual standard error: 34.63 on 514 degrees of freedom
+Multiple R-squared:  0.5721,    Adjusted R-squared:  0.5712 
+F-statistic: 687.2 on 1 and 514 DF,  p-value: < 2.2e-16

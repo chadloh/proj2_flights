@@ -128,8 +128,13 @@ airfare <-
   mutate(city2 = gsub("Metropolitan Area", "", city2), 
          city2 = gsub("[()]", "", city2), 
          city2 = trimws(city2, which = "both", whitespace = "[ \t\r\n]")) %>%
-  select(c("city1", "city2", "nsmiles", "passengers", "fare")) %>%
-  arrange(city1)
+  select(c("city1", "city2", "nsmiles", "passengers", "fare", 
+           "carrier_lg", "large_ms", "fare_lg", "carrier_low", "lf_ms", "fare_low")) %>%
+  arrange(city1) %>%
+  mutate(other_ms = round(1 - large_ms - lf_ms*(carrier_lg != carrier_low),4)) %>%
+  mutate(fare_other = ifelse(other_ms == 0, 
+                             fare,
+                             (fare - fare_lg * large_ms - fare_low * lf_ms * (carrier_lg != carrier_low))/other_ms))
 
 uscitylist <- airfare %>%
   gather(key = "od", value = "City", city1, city2) %>%
@@ -164,7 +169,15 @@ rep <-
 fare_pair <-
   airfare %>%
   group_by(city1, city2) %>%
-  summarise(nsmiles = mean(nsmiles), passengers_sum = sum(passengers), fare_mean = weighted.mean(fare,passengers)) %>%
+  summarise(nsmiles = mean(nsmiles), 
+            passengers_sum = sum(passengers), 
+            fare_mean = weighted.mean(fare,passengers),
+            carrier_lg = first(carrier_lg),
+            fare_lg = weighted.mean(fare_lg, passengers),
+            carrier_low = first(carrier_low),
+            fare_low = weighted.mean(fare_low, passengers),
+            fare_other = weighted.mean(fare_other)
+            ) %>%
 # join with airports_wiki data for longitude and latitude
   left_join(rep[c(1,3,4)], by = c("city1" = "City")) %>%
   rename(port1_lat = lat, port1_lon = lon) %>%
@@ -230,6 +243,10 @@ Statistics
 
 ```{r price per miles}
 
+summary(fare_pair)
+fare_pair %>% arrange(desc(fare_mean)) %>% tail(5)
+
+
 flights_pair2 <- 
   flights %>%
   mutate(pair = ifelse(org<des, paste0(org,'-',des), paste0(des,'-',org))) %>%
@@ -242,30 +259,43 @@ flights_pair2 <-
   rename(carrier_name = Short.Name) %>%
   filter(carrier_name %in% airline_name)
 
+
+for(i in 1:nrow(flights_pair2)){
+  flights_pair2$Hubs[i] = 
+    grepl(flights_pair2$port1[i], flights_pair2$Hubs[i]) | 
+    grepl(flights_pair2$port2[i], flights_pair2$Hubs[i]) 
+}
+
+
+
 ppm_df <-
 flights_pair2 %>%
   left_join(airport_city[c(1,2)], by = c("port1" = "Code")) %>%
   rename(city1 = City) %>%
   left_join(airport_city[c(1,2)], by = c("port2" = "Code")) %>%
   rename(city2 = City) %>%
-  left_join(fare_pair[1:5], by = c("city1" = "city1", "city2" = "city2")) %>%
-  left_join(fare_pair[1:5], by = c("city1" = "city2", "city2" = "city1")) %>%
-  mutate(nsmiles = coalesce(nsmiles.x, nsmiles.y)) %>% 
-  mutate(passengers_sum = coalesce(passengers_sum.x, passengers_sum.y)) %>% 
-  mutate(fare_mean = coalesce(fare_mean.x, fare_mean.y)) %>% 
-  mutate(ppm = fare_mean/nsmiles) %>% 
-  select(-nsmiles.x, -nsmiles.y, 
-         -passengers_sum.x, -passengers_sum.y, 
-         -fare_mean.x, -fare_mean.y) %>%
-  na.omit()
+  left_join(fare_pair[1:10], by = c("city1" = "city1", "city2" = "city2")) %>%
+  left_join(fare_pair[1:10], by = c("city1" = "city2", "city2" = "city1")) %>%
+  mutate(nsmiles = coalesce(nsmiles.x, nsmiles.y),
+         passengers_sum = coalesce(passengers_sum.x, passengers_sum.y),
+         carrier_lg = coalesce(carrier_lg.x, carrier_lg.y),
+         fare_lg = coalesce(fare_lg.x, fare_lg.y),
+         carrier_low = coalesce(carrier_low.x, carrier_low.y),
+         fare_low = coalesce(fare_low.x, fare_low.y),
+         fare_other = coalesce(fare_other.x, fare_other.y)) %>% 
+  select(-ends_with('.x'), -ends_with('.y')) %>% 
+  na.omit() %>%
+  mutate(fare = fare_lg*(carrier == carrier_lg) + 
+           fare_low*(carrier == carrier_low)*(carrier_lg != carrier_low) + 
+           fare_other*(carrier != carrier_lg)*(carrier != carrier_low)) %>%
+  select(-ends_with('_lg'), -ends_with('_low'), -fare_other) %>%
+  mutate(ppm = fare/dist, income = fare*passengers_sum)
 
-for(i in 1:nrow(ppm_df)){
-  ppm_df$Hubs[i] = grepl(ppm_df$port1[i], ppm_df$Hubs[i]) | grepl(ppm_df$port2[i], ppm_df$Hubs[i]) 
-}
+ppm_df$Hubs = as.numeric(unlist(ppm_df$Hubs)) 
 
-ppm_df <-
-  ppm_df %>%
-  mutate(Hubs = ifelse(Hubs,"Hub flight", "Not a hub flight"))
+
+str(ppm_df)
+summary(ppm_df)
 
 ```
 
@@ -275,24 +305,26 @@ ppm_df <-
 # ppm_plot
 
 
-ggplot(data = ppm_df, aes(x = dist, y = fare_mean, color = carrier_name)) +
-  geom_point(alpha = 0.5) +
+ppm_plot <-
+  ggplot(data = ppm_df, aes(x = dist, y = fare, color = carrier_name)) +
+  geom_point(alpha = 0.5, size = 0.5) +
   scale_color_manual(values=airline_color) + 
-  geom_smooth(method="lm", formula = y~x)+
+  geom_smooth(method="lm", formula = y~x) +
   theme(panel.background=element_rect(fill='transparent'),
         plot.background = element_rect(fill='#111111', color=NA), 
         panel.border=element_blank(),
         panel.grid.major=element_line(color = "#444444"),
-        panel.grid.minor=element_blank(),
-        legend.position="bottom")
+        panel.grid.minor=element_blank())
   
+ggsave("ppm.svg",plot = ppm_plot, height=9, width=12,dpi=300)
+
 ```
 
 
 ```{r}
 # hub_plot
   
-ggplot(ppm_df, aes(x=Hubs, y=ppm)) + 
+ggplot(ppm_df, aes(x=Hubs, y=ppm, group = Hubs)) + 
   geom_jitter(position=position_jitter(width=0.3), aes(color = carrier_name), alpha=0.25) +
   geom_boxplot(alpha = 0.25, show.legend = FALSE, aes(fill=carrier_name)) +
   facet_wrap(.~carrier_name, ncol = 5) +
@@ -300,6 +332,18 @@ ggplot(ppm_df, aes(x=Hubs, y=ppm)) +
   scale_color_manual(values=airline_color) + 
   scale_fill_manual(values=airline_color) + 
   guides(color=guide_legend("Airlines"))
+
+  
+ggplot(ppm_df, aes(x=Hubs, y=income, group = Hubs)) + 
+  geom_jitter(position=position_jitter(width=0.3), aes(color = carrier_name), alpha=0.25) +
+  geom_boxplot(alpha = 0.25, show.legend = FALSE, aes(fill=carrier_name)) +
+  facet_wrap(.~carrier_name, ncol = 10) +
+  theme(strip.text.x = element_text(size=9, color="black", face="bold")) + 
+  scale_color_manual(values=airline_color) + 
+  scale_fill_manual(values=airline_color) + 
+  guides(color=guide_legend("Airlines"))
+
+
 
 ```
 
@@ -309,7 +353,8 @@ ggplot(ppm_df, aes(x=Hubs, y=ppm)) +
 Save data as csv files
 
 ```{r}
-write.csv(flights_pair,"flights_pair.csv", row.names = FALSE)
+write.csv(flights_pair %>% select(-Hubs),"flights_pair.csv", row.names = FALSE)
+write.csv(flights_pair2 %>% select(-Hubs),"flights_pair2.csv", row.names = FALSE)
 write.csv(airports,"airports.csv", row.names = FALSE)
 write.csv(paths,"paths.csv", row.names = FALSE)
 write.csv(fare_pair,"fare_pair.csv", row.names = FALSE)
@@ -318,7 +363,6 @@ write.csv(fares,"fares.csv", row.names = FALSE)
 write.csv(ppm_df,"ppm_df.csv", row.names = FALSE)
 
 ```
-
 
 
 ```{r}
