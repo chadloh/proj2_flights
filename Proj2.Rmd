@@ -289,13 +289,11 @@ flights_pair2 %>%
            fare_low*(carrier == carrier_low)*(carrier_lg != carrier_low) + 
            fare_other*(carrier != carrier_lg)*(carrier != carrier_low)) %>%
   select(-ends_with('_lg'), -ends_with('_low'), -fare_other) %>%
-  mutate(ppm = fare/dist, income = fare*passengers_sum)
+  mutate(ppm = fare/dist, income = fare*passengers_sum) %>%
+  group_by(pair) %>%
+  mutate(compete = n())
 
 ppm_df$Hubs = as.numeric(unlist(ppm_df$Hubs)) 
-
-
-str(ppm_df)
-summary(ppm_df)
 
 ```
 
@@ -320,18 +318,74 @@ ggsave("ppm.svg",plot = ppm_plot, height=9, width=12,dpi=300)
 
 ```
 
+```{r compete plot}
+
+compete_plot <-
+  ggplot(data = ppm_df, aes(x = dist, y = fare, color = as.factor(compete))) +
+  geom_point(alpha = 0.5, size = 0.5) +
+  geom_smooth(method="lm", formula = y~x) +
+  scale_color_brewer(palette="RdYlGn") +
+  theme(panel.background=element_rect(fill='transparent'),
+        plot.background = element_rect(fill='#111111', color=NA), 
+        panel.border=element_blank(),
+        panel.grid.major=element_line(color = "#444444"),
+        panel.grid.minor=element_blank())
+  
+ggsave("compete.svg",plot = compete_plot, height=9, width=12,dpi=300)
+```
+
+
+```{r Linear regression}
+
+for (i in 1:10){
+  model = lm(fare ~ dist, data = ppm_df[ppm_df$carrier_name==airline_name[i],])
+  print(airline_name[i])
+  print(cor(ppm_df[ppm_df$carrier_name==airline_name[i],]$fare, 
+      ppm_df[ppm_df$carrier_name==airline_name[i],]$dist))
+  plot(model)
+  # print(model$coefficients)
+}
+
+for (i in c(1,2,3,4,6,7,8,9,10)){
+  model = lm(fare ~ dist, data = ppm_df[ppm_df$carrier_name==airline_name[i]&
+                                          ppm_df$Hubs==1,])
+  print(airline_name[i])
+  print(cor(ppm_df[ppm_df$carrier_name==airline_name[i]&
+                                          ppm_df$Hubs==1,]$fare, 
+      ppm_df[ppm_df$carrier_name==airline_name[i]&
+                                          ppm_df$Hubs==1,]$dist))
+  # print(model$coefficients)
+  # print(summary(model))
+}
+
+for (i in c(1,2,3,4,6,7,8,9,10)){
+  hub_fare = ppm_df[ppm_df$carrier_name==airline_name[i]&ppm_df$Hubs==1,]$fare
+  nonhub_fare = ppm_df[ppm_df$carrier_name==airline_name[i]&ppm_df$Hubs==0,]$fare
+  
+  print(airline_name[i])
+  print(t.test(hub_fare, nonhub_fare, alternative = "greater"))
+}
+
+
+```
+
 
 ```{r}
 # hub_plot
   
-ggplot(ppm_df, aes(x=Hubs, y=ppm, group = Hubs)) + 
+hnh <-
+  ggplot(ppm_df, aes(x=Hubs, y=ppm, group = Hubs)) + 
   geom_jitter(position=position_jitter(width=0.3), aes(color = carrier_name), alpha=0.25) +
   geom_boxplot(alpha = 0.25, show.legend = FALSE, aes(fill=carrier_name)) +
-  facet_wrap(.~carrier_name, ncol = 5) +
+  facet_wrap(.~carrier_name, ncol = 10) +
   theme(strip.text.x = element_text(size=9, color="black", face="bold")) + 
   scale_color_manual(values=airline_color) + 
   scale_fill_manual(values=airline_color) + 
   guides(color=guide_legend("Airlines"))
+
+
+ggsave("hub_nohub.svg",plot = hnh, height=9, width=12,dpi=300)
+
 
   
 ggplot(ppm_df, aes(x=Hubs, y=income, group = Hubs)) + 
@@ -363,6 +417,8 @@ write.csv(fares,"fares.csv", row.names = FALSE)
 write.csv(ppm_df,"ppm_df.csv", row.names = FALSE)
 
 ```
+
+
 
 
 ```{r}

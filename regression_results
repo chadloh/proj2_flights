@@ -207,3 +207,140 @@ Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’
 Residual standard error: 34.63 on 514 degrees of freedom
 Multiple R-squared:  0.5721,    Adjusted R-squared:  0.5712 
 F-statistic: 687.2 on 1 and 514 DF,  p-value: < 2.2e-16
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+HUB - NOHUB 2 sample t-test
+
+
+
+[1] "Alaska"
+
+    Welch Two Sample t-test
+
+data:  hub_fare and nonhub_fare
+t = 1.5161, df = 47.32, p-value = 0.06808
+alternative hypothesis: true difference in means is greater than 0
+95 percent confidence interval:
+ -1.875019       Inf
+sample estimates:
+mean of x mean of y 
+ 207.4647  189.8760 
+
+[1] "American"
+
+    Welch Two Sample t-test
+
+data:  hub_fare and nonhub_fare
+t = 1.8898, df = 78.754, p-value = 0.03123
+alternative hypothesis: true difference in means is greater than 0
+95 percent confidence interval:
+ 1.212554      Inf
+sample estimates:
+mean of x mean of y 
+ 195.6058  185.4388 
+
+[1] "Delta"
+
+    Welch Two Sample t-test
+
+data:  hub_fare and nonhub_fare
+t = 4.0764, df = 563.22, p-value = 2.616e-05
+alternative hypothesis: true difference in means is greater than 0
+95 percent confidence interval:
+ 10.03941      Inf
+sample estimates:
+mean of x mean of y 
+ 208.1223  191.2728 
+
+[1] "Frontier"
+
+    Welch Two Sample t-test
+
+data:  hub_fare and nonhub_fare
+t = -1.8264, df = 88.39, p-value = 0.9644
+alternative hypothesis: true difference in means is greater than 0
+95 percent confidence interval:
+ -24.99261       Inf
+sample estimates:
+mean of x mean of y 
+ 143.0938  156.1781 
+
+[1] "Jetblue"
+
+    Welch Two Sample t-test
+
+data:  hub_fare and nonhub_fare
+t = 1.6427, df = 249.83, p-value = 0.05085
+alternative hypothesis: true difference in means is greater than 0
+95 percent confidence interval:
+ -0.05105532         Inf
+sample estimates:
+mean of x mean of y 
+ 194.3090  184.1277 
+
+[1] "Skywest"
+
+    Welch Two Sample t-test
+
+data:  hub_fare and nonhub_fare
+t = -0.21626, df = 52.098, p-value = 0.5852
+alternative hypothesis: true difference in means is greater than 0
+95 percent confidence interval:
+ -10.92955       Inf
+sample estimates:
+mean of x mean of y 
+ 185.5932  186.8432 
+
+[1] "Southwest"
+
+    Welch Two Sample t-test
+
+data:  hub_fare and nonhub_fare
+t = -3.1216, df = 796.63, p-value = 0.9991
+alternative hypothesis: true difference in means is greater than 0
+95 percent confidence interval:
+ -15.21909       Inf
+sample estimates:
+mean of x mean of y 
+ 179.8993  189.8625 
+
+[1] "Spirit"
+
+    Welch Two Sample t-test
+
+data:  hub_fare and nonhub_fare
+t = -2.8, df = 70.073, p-value = 0.9967
+alternative hypothesis: true difference in means is greater than 0
+95 percent confidence interval:
+ -37.82562       Inf
+sample estimates:
+mean of x mean of y 
+ 134.7490  158.4594 
+
+[1] "United"
+
+    Welch Two Sample t-test
+
+data:  hub_fare and nonhub_fare
+t = 3.2542, df = 513.91, p-value = 0.0006059
+alternative hypothesis: true difference in means is greater than 0
+95 percent confidence interval:
+ 7.352411      Inf
+sample estimates:
+mean of x mean of y 
+ 206.5565  191.6621 
