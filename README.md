@@ -1,12 +1,5 @@
 
-# The Competition and Monopoly in the US AIRLINE INDUSTRY
-
-A brief description of what this project does and who it's for
-
-**This project explores the New York City building data (859,032 data points).**
-
-**The historic construction booms in NYC are analyzed and visualized.**
-
+# The Competition and Monopoly in the US Airline Industry
 
 [Github Repository](https://github.com/chadloh/proj2_flights) |
 [Presentation](https://1drv.ms/p/s!AtY5Rersg7_NgqFZEpcqG6fpw8Mzeg?e=JDl3fd)
