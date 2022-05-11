@@ -1,0 +1,605 @@
+---
+title: "proj2"
+author: "Chad Loh"
+date: '2022-04-29'
+output: html_document
+---
+
+
+
+```{r import libraries}
+library(tidyverse)
+library(maps)
+library(sp)
+library(grid)
+library(ggrepel)
+library(png)
+library(svglite)
+library(cowplot)
+library(geosphere)
+# library(leaflet)
+# library(raster)
+
+
+base_world <- map_data("state")
+airline_color = c('#64489d', '#757576', '#db4a3d', '#97c352', '#d12b64', 
+                  '#67a4d9', '#4a9588', '#ec9b29', '#f7eb51', '#4d54a4')
+airline_name = c('Alaska', 'American', 'Delta', 'Frontier', 'Hawaiian',
+                 'Jetblue', 'Skywest', 'Southwest', 'Spirit', 'United')
+
+
+#connection function
+connection = function(lon1, lat1, lon2, lat2, group) {
+  inter <- gcIntermediate(c(lon1, lat1), c(lon2, lat2), n=50, addStartEnd=TRUE, breakAtDateLine=F) %>% data.frame
+  inter$group=group
+  return(inter)
+}
+
+```
+
+Reading the cleaned data
+
+```{r}
+flights_pair = read.csv("flights_pair.csv")
+airports = read.csv("airports.csv")
+paths = read.csv("paths.csv")
+fare_pair = read.csv("fare_pair.csv")
+cities = read.csv("cities.csv")
+fares = read.csv("fares.csv")
+ppm_df = read.csv("ppm_df.csv")
+
+```
+
+
+Importing the raw data
+
+```{r import data}
+airfare_raw     <- read.csv("data/airfare_full.csv")
+airlines        <- read.csv('data/airlines.csv')
+airports_wiki_raw<- read.csv('data/airports_wiki.csv')[c(4,5,6,13,14,17,22)]
+airports_enplanements <- read.csv('data/airports_enplanements.csv')
+flights         <- read.csv('data/flights.asc', 
+                sep = '|', header = F)[c(1,2,3,7,11,13,14,16)]
+airport_city <- read.csv('data/airport_city.csv')
+colnames(flights) <- c('year', 'month', 'org', 'des', 
+                       'carrier', 'grp', 'dist', 'pass')
+
+#adjust alaska and hawaii location
+airports_wiki <- 
+  airports_wiki_raw %>%
+  mutate(lat = case_when(local_region == 'AK' ~ latitude_deg-20,
+                         local_region == 'HI' ~ latitude_deg+10,
+                         TRUE ~ latitude_deg),
+         lon = case_when(local_region == 'AK' ~ longitude_deg+15,
+                         local_region == 'HI' ~ longitude_deg+25,
+                         TRUE ~ longitude_deg))
+airlines <-
+  airlines %>% 
+  mutate(Hubs = strsplit(Hubs,","))
+```
+
+
+```{r cleaning data for the flight plots}
+
+flights_pair <- 
+  flights %>%
+  mutate(pair = ifelse(org<des, paste0(org,'-',des), paste0(des,'-',org))) %>%
+  group_by(pair, carrier) %>%
+  summarise(dist = mean(dist), pass=sum(pass)) %>%
+  arrange(desc(pass)) %>%
+  filter(pass > 100000) %>%
+  mutate(port1 = substr(pair,1,3), port2 = substr(pair,5,7)) %>%
+# join with airports_wiki data for longitude and latitude
+  left_join(airports_wiki[c(6,8,9)], by = c("port1" = "iata_code")) %>%
+  rename(port1_lat = lat, port1_lon = lon) %>%
+  left_join(airports_wiki[c(6,8,9)], by = c("port2" = "iata_code")) %>%
+  rename(port2_lat = lat, port2_lon = lon) %>%
+  filter(!any(is.na(port1_lat), is.na(port1_lon), is.na(port2_lat), is.na(port2_lon))) %>%
+# join with airlines 
+  left_join(airlines[c(1,4,5)], by = c("carrier"="IATA.Code")) %>%
+  rename(carrier_name = Short.Name) %>%
+  filter(carrier_name %in% airline_name)
+
+#find airport list with flights with more than 500000 passengers
+airports <-
+flights_pair %>%
+  ungroup() %>%
+  filter(pass > 500000) %>%
+  pivot_longer(cols = c(port1, port2), names_to = "temp", values_to = "ports") %>%
+  select(ports) %>%
+  distinct() %>%
+# get coordinates and enplanement data
+  left_join(airports_wiki[c(6,8,9)], by = c("ports" = "iata_code")) %>%
+  left_join(airports_enplanements[c(4,8)], by= c("ports" = "IATA")) %>%
+  mutate(Enplanements = as.numeric(gsub(",","",Enplanements)))
+
+```
+
+
+
+```{r cleaning data for the fare plots}
+
+airfare <-
+  airfare_raw %>%
+  filter(Year == 2021 & passengers>250) %>%
+  mutate(city1 = gsub("Metropolitan Area", "", city1), 
+         city1 = gsub("[()]", "", city1), 
+         city1 = trimws(city1, which = "both", whitespace = "[ \t\r\n]")) %>%
+  mutate(city2 = gsub("Metropolitan Area", "", city2), 
+         city2 = gsub("[()]", "", city2), 
+         city2 = trimws(city2, which = "both", whitespace = "[ \t\r\n]")) %>%
+  select(c("city1", "city2", "nsmiles", "passengers", "fare", 
+           "carrier_lg", "large_ms", "fare_lg", "carrier_low", "lf_ms", "fare_low")) %>%
+  arrange(city1) %>%
+  mutate(other_ms = round(1 - large_ms - lf_ms*(carrier_lg != carrier_low),4)) %>%
+  mutate(fare_other = ifelse(other_ms == 0, 
+                             fare,
+                             (fare - fare_lg * large_ms - fare_low * lf_ms * (carrier_lg != carrier_low))/other_ms))
+
+uscitylist <- airfare %>%
+  gather(key = "od", value = "City", city1, city2) %>%
+  distinct(City)
+  
+
+#making the list of airports that represents the city
+
+rep <- 
+  uscitylist %>% 
+  left_join(airports[1] %>% left_join(airport_city[1:2], by = c("ports" = "Code")), by = c("City" = "City"))
+temp <-
+  rep[is.na(rep$ports),] %>% 
+  left_join(airport_city[1:2], by = c("City" = "City")) %>%
+  mutate(ports = Code) %>%
+  select(-Code) %>%
+  select(City, ports) %>%
+  group_by(City) %>%
+  summarise(ports = first(ports))
+
+rep <-
+  rep %>% 
+  left_join(temp, by=("City" = "City")) %>% 
+  mutate(port = coalesce(ports.x, ports.y)) %>% 
+  select(City, port) %>%
+  left_join(airports_wiki[c(6,8,9)], by = c("port" = "iata_code")) %>%
+  filter(!is.na(lat)) %>%
+  group_by(City) %>%
+  filter(row_number()==1) %>%
+  arrange(City)
+
+fare_pair <-
+  airfare %>%
+  group_by(city1, city2) %>%
+  summarise(nsmiles = mean(nsmiles), 
+            passengers_sum = sum(passengers), 
+            fare_mean = weighted.mean(fare,passengers),
+            carrier_lg = first(carrier_lg),
+            fare_lg = weighted.mean(fare_lg, passengers),
+            carrier_low = first(carrier_low),
+            fare_low = weighted.mean(fare_low, passengers),
+            fare_other = weighted.mean(fare_other)
+            ) %>%
+# join with airports_wiki data for longitude and latitude
+  left_join(rep[c(1,3,4)], by = c("city1" = "City")) %>%
+  rename(port1_lat = lat, port1_lon = lon) %>%
+  left_join(rep[c(1,3,4)], by = c("city2" = "City"))  %>%
+  rename(port2_lat = lat, port2_lon = lon) %>%
+  na.omit()
+
+cities <-
+  fare_pair %>%
+  ungroup() %>%
+  filter(passengers_sum > 3000) %>%
+  pivot_longer(cols = c(city1, city2), names_to = "temp", values_to = "cities") %>%
+  select(cities) %>%
+  distinct() %>%
+  left_join(rep[c(1,3,4)], by = c("cities" = "City"))
+```
+
+
+```{r making paths for flights}
+
+port1_sp <- SpatialPoints(coords = cbind(flights_pair$port1_lon, flights_pair$port1_lat), proj4string = CRS("+init=epsg:4326"))
+port2_sp <- SpatialPoints(coords = cbind(flights_pair$port2_lon, flights_pair$port2_lat), proj4string = CRS("+init=epsg:4326"))
+
+paths <- data.frame()
+
+for(i in 1:nrow(flights_pair)){
+  tmp = connection(flights_pair$port1_lon[i], flights_pair$port1_lat[i], 
+                   flights_pair$port2_lon[i], flights_pair$port2_lat[i], i)
+  tmp$pair <- flights_pair$pair[i]
+  tmp$port1 <- flights_pair$port1[i]
+  tmp$port2 <- flights_pair$port2[i]
+  tmp$carrier <- flights_pair$carrier_name[i]
+  tmp$pass <- flights_pair$pass[i]
+  paths=rbind(paths, tmp)
+}
+
+```
+
+
+```{r making paths for fare}
+
+city1_sp <- SpatialPoints(coords = cbind(fare_pair$port1_lon, fare_pair$port1_lat), proj4string = CRS("+init=epsg:4326"))
+city2_sp <- SpatialPoints(coords = cbind(fare_pair$port2_lon, fare_pair$port2_lat), proj4string = CRS("+init=epsg:4326"))
+
+fares <- data.frame()
+
+for(i in 1:nrow(fare_pair)){
+  tmp = connection(fare_pair$port1_lon[i], fare_pair$port1_lat[i], 
+                   fare_pair$port2_lon[i], fare_pair$port2_lat[i], i)
+  tmp$city1 <- fare_pair$city1[i]
+  tmp$city2 <- fare_pair$city2[i]
+  tmp$pass <- fare_pair$passengers_sum[i]
+  tmp$fare <- fare_pair$fare_mean[i]
+  tmp$income <- fare_pair$fare_mean[i]*fare_pair$passengers_sum[i]
+  tmp$fare.per.miles <- fare_pair$fare_mean[i]/fare_pair$nsmiles[i]
+  fares=rbind(fares, tmp)
+}
+
+```
+
+
+Statistics
+
+```{r price per miles}
+
+summary(fare_pair)
+fare_pair %>% arrange(desc(fare_mean)) %>% tail(5)
+
+
+flights_pair2 <- 
+  flights %>%
+  mutate(pair = ifelse(org<des, paste0(org,'-',des), paste0(des,'-',org))) %>%
+  group_by(pair, carrier) %>%
+  summarise(dist = mean(dist), pass=sum(pass)) %>%
+  arrange(desc(pass)) %>%
+  mutate(port1 = substr(pair,1,3), port2 = substr(pair,5,7)) %>%
+# join with airlines 
+  left_join(airlines[c(1,4,5)], by = c("carrier"="IATA.Code")) %>%
+  rename(carrier_name = Short.Name) %>%
+  filter(carrier_name %in% airline_name)
+
+
+flights_pair3 <- 
+  flights %>%
+  mutate(pair = ifelse(org<des, paste0(org,'-',des), paste0(des,'-',org))) %>%
+  group_by(pair, carrier) %>%
+  summarise(dist = mean(dist), pass=sum(pass)) %>%
+  arrange(desc(pass)) %>%
+  mutate(port1 = substr(pair,1,3), port2 = substr(pair,5,7)) %>%
+# join with airlines 
+  left_join(airlines[c(1,4,5)], by = c("carrier"="IATA.Code")) %>%
+  rename(carrier_name = Short.Name)
+
+
+for(i in 1:nrow(flights_pair2)){
+  flights_pair2$Hubs[i] = 
+    grepl(flights_pair2$port1[i], flights_pair2$Hubs[i]) | 
+    grepl(flights_pair2$port2[i], flights_pair2$Hubs[i]) 
+}
+
+
+
+ppm_df <-
+flights_pair2 %>%
+  left_join(airport_city[c(1,2)], by = c("port1" = "Code")) %>%
+  rename(city1 = City) %>%
+  left_join(airport_city[c(1,2)], by = c("port2" = "Code")) %>%
+  rename(city2 = City) %>%
+  left_join(fare_pair[1:10], by = c("city1" = "city1", "city2" = "city2")) %>%
+  left_join(fare_pair[1:10], by = c("city1" = "city2", "city2" = "city1")) %>%
+  mutate(nsmiles = coalesce(nsmiles.x, nsmiles.y),
+         passengers_sum = coalesce(passengers_sum.x, passengers_sum.y),
+         carrier_lg = coalesce(carrier_lg.x, carrier_lg.y),
+         fare_lg = coalesce(fare_lg.x, fare_lg.y),
+         carrier_low = coalesce(carrier_low.x, carrier_low.y),
+         fare_low = coalesce(fare_low.x, fare_low.y),
+         fare_other = coalesce(fare_other.x, fare_other.y)) %>% 
+  select(-ends_with('.x'), -ends_with('.y')) %>% 
+  na.omit() %>%
+  mutate(fare = fare_lg*(carrier == carrier_lg) + 
+           fare_low*(carrier == carrier_low)*(carrier_lg != carrier_low) + 
+           fare_other*(carrier != carrier_lg)*(carrier != carrier_low)) %>%
+  select(-ends_with('_lg'), -ends_with('_low'), -fare_other) %>%
+  mutate(ppm = fare/dist, income = fare*passengers_sum) %>%
+  mutate(compete = min(n(),8),
+         carrier_cat = as.factor(case_when(carrier %in% c('DL', 'UA') ~ 1,
+                                 carrier %in% c('AA','B6','AS', 'HA') ~ 2,
+                                 TRUE ~ 3)),
+         Hubs = as.numeric(Hubs))
+  
+  
+
+ppm_df$Hubs = as.numeric(unlist(ppm_df$Hubs)) 
+ppm_df$top4 = (ppm_df$carrier == c('DL', 'AA', 'WN', 'UA'))
+
+
+ppm_df2 <-
+flights_pair3 %>%
+  select(-Hubs) %>%
+  # filter(pass > 100) %>%
+  left_join(airport_city[c(1,2)], by = c("port1" = "Code")) %>%
+  rename(city1 = City) %>%
+  left_join(airport_city[c(1,2)], by = c("port2" = "Code")) %>%
+  rename(city2 = City) %>%
+  left_join(fare_pair[1:10], by = c("city1" = "city1", "city2" = "city2")) %>%
+  left_join(fare_pair[1:10], by = c("city1" = "city2", "city2" = "city1")) %>%
+  mutate(fare = coalesce(fare_mean.x, fare_mean.y)) %>% 
+  select(-ends_with('.x'), -ends_with('.y')) %>% 
+  na.omit() %>%
+  group_by(pair) %>%
+  # mutate(compete = n()) %>%
+  mutate(compete = min(n(),8)) %>%
+  summarize(dist = first(dist), fare = first(fare), compete = first(compete))
+
+
+
+```
+
+```{r multilinear regression}
+
+
+model = lm(fare ~ dist + Hubs + compete, data = ppm_df %>% filter(carrier == 'DL'))
+summary(model)
+
+plot(model)
+
+
+bc = boxcox(model) 
+lambda = bc$x[which(bc$y == max(bc$y))] 
+
+Hwt.bc = (cats$Hwt^lambda - 1)/lambda 
+model.bc = lm(Hwt.bc ~ cats$Bwt) 
+summary(model.bc)
+
+```
+
+
+```{r}
+# ppm_plot
+
+
+ppm_plot <-
+  ggplot(data = ppm_df, aes(x = dist, y = fare, color = carrier_name)) +
+  geom_point(alpha = 0.5, size = 0.5) +
+  scale_color_manual(values=airline_color) + 
+  geom_smooth(method="lm", formula = y~x) +
+  theme(panel.background=element_rect(fill='transparent'),
+        plot.background = element_rect(fill='#111111', color=NA), 
+        panel.border=element_blank(),
+        panel.grid.major=element_line(color = "#444444"),
+        panel.grid.minor=element_blank())
+  
+ggsave("ppm.svg",plot = ppm_plot, height=9, width=12,dpi=300)
+
+```
+
+```{r compete plot}
+
+compete_plot <-
+  ggplot(data = ppm_df2, aes(x = dist, y = fare, color = as.factor(compete))) +
+  geom_point(alpha = 0.75, size = 1) +
+  geom_smooth(method="lm", formula = y~x) +
+  scale_color_brewer(palette="RdYlBu") +
+  theme(panel.background=element_rect(fill='transparent'),
+        # plot.background = element_rect(fill='#111111', color=NA), 
+        panel.border=element_blank(),
+        panel.grid.major=element_line(color = "#444444"),
+        panel.grid.minor=element_blank())
+
+compete_plot
+  
+ggsave("compete.svg",plot = compete_plot, height=9, width=12,dpi=300)
+
+p = data.frame(matrix(ncol = 3, nrow = 8))
+colnames(p) <- c('compete', 'beta0', 'beta1')
+
+for (i in 1:8){
+  model = lm(fare ~ dist, data = ppm_df2[ppm_df2$compete==i,])
+  summary = summary(model)
+  p[i,] = c(i, summary$coefficients[1,1], summary$coefficients[2,1]*1000)
+}
+
+p
+
+
+```
+
+
+```{r Linear regression}
+
+for (i in 1:10){
+  model = lm(fare ~ dist, data = ppm_df[ppm_df$carrier_name==airline_name[i],])
+  print(airline_name[i])
+  print(cor(ppm_df[ppm_df$carrier_name==airline_name[i],]$fare, 
+      ppm_df[ppm_df$carrier_name==airline_name[i],]$dist))
+  plot(model)
+  # print(model$coefficients)
+}
+
+for (i in c(1,2,3,4,6,7,8,9,10)){
+  model = lm(fare ~ dist, data = ppm_df[ppm_df$carrier_name==airline_name[i]&
+                                          ppm_df$Hubs==1,])
+  print(airline_name[i])
+  print(cor(ppm_df[ppm_df$carrier_name==airline_name[i]&ppm_df$Hubs==1,]$fare, 
+      ppm_df[ppm_df$carrier_name==airline_name[i]$ppm_df$Hubs==1,]$dist))
+  # print(model$coefficients)
+  # print(summary(model))
+}
+
+
+for (i in c(1,2,3,4,6,7,8,9,10)){
+  hub_fare = ppm_df[ppm_df$carrier_name==airline_name[i]&ppm_df$Hubs==1,]$fare
+  nonhub_fare = ppm_df[ppm_df$carrier_name==airline_name[i]&ppm_df$Hubs==0,]$fare
+  
+  print(airline_name[i])
+  print(t.test(hub_fare, nonhub_fare, alternative = "greater"))
+}
+
+
+p2 = data.frame(matrix(ncol = 7, nrow = 10))
+colnames(p2) <- c('airline', 'beta0', 'beta0p', 'beta1', 'beta1p', 'beta2', 'beta2p')
+for (i in c(1,2,3,4,6,7,8,9,10)){
+  model = lm(fare ~ dist + Hubs, data = ppm_df[ppm_df$carrier_name==airline_name[i],])
+  summary = summary(model)
+  p2[i,] = c(airline_name[i], 
+             summary$coefficients[1,1], summary$coefficients[1,4],
+             summary$coefficients[2,1]*1000, summary$coefficients[2,4],
+             summary$coefficients[3,1], summary$coefficients[3,4])
+}
+summary
+
+p2 %>% na.omit()
+```
+
+
+```{r}
+# hub_plot
+
+
+  
+hnh <-
+  ggplot(ppm_df, aes(x=Hubs, y=ppm, group = Hubs)) + 
+  geom_jitter(position=position_jitter(width=0.3), aes(color = carrier_name), alpha=0.25) +
+  geom_boxplot(alpha = 0.25, show.legend = FALSE, aes(fill=carrier_name)) +
+  facet_wrap(.~carrier_name, ncol = 10) +
+  theme(strip.text.x = element_text(size=9, color="black", face="bold")) + 
+  scale_color_manual(values=airline_color) + 
+  scale_fill_manual(values=airline_color) + 
+  guides(color=guide_legend("Airlines"))
+
+
+ggsave("hub_nohub.svg",plot = hnh, height=9, width=12,dpi=300)
+
+
+  
+ggplot(ppm_df, aes(x=Hubs, y=income, group = Hubs)) + 
+  geom_jitter(position=position_jitter(width=0.3), aes(color = carrier_name), alpha=0.25) +
+  geom_boxplot(alpha = 0.25, show.legend = FALSE, aes(fill=carrier_name)) +
+  facet_wrap(.~carrier_name, ncol = 10) +
+  theme(strip.text.x = element_text(size=9, color="black", face="bold")) + 
+  scale_color_manual(values=airline_color) + 
+  scale_fill_manual(values=airline_color) + 
+  guides(color=guide_legend("Airlines"))
+
+
+
+```
+
+
+
+
+Save data as csv files
+
+```{r}
+write.csv(flights_pair %>% select(-Hubs),"flights_pair.csv", row.names = FALSE)
+write.csv(flights_pair2 %>% select(-Hubs),"flights_pair2.csv", row.names = FALSE)
+write.csv(airports,"airports.csv", row.names = FALSE)
+write.csv(paths,"paths.csv", row.names = FALSE)
+write.csv(fare_pair,"fare_pair.csv", row.names = FALSE)
+write.csv(cities,"cities.csv", row.names = FALSE)
+write.csv(fares,"fares.csv", row.names = FALSE)
+write.csv(ppm_df,"ppm_df.csv", row.names = FALSE)
+
+```
+
+
+```{r}
+airports %>% arrange(Enplanements)
+```
+
+
+```{r}
+# airline_legend <- data.frame(c('img/airlines-12.png'))
+# airline_legend <- readPNG('img/airlines-12.png')
+
+airlines = c('Alaska', 'American', 'Delta', 'Frontier', 'Hawaiian', 'Jetblue', 'Skywest', 'Southwest', 'Spirit', 'United')
+
+p <- ggplot() + 
+  geom_polygon(data=base_world, aes(long, lat, group=group), fill="#eaf0f9", color="#c9daf0") + 
+  geom_line(data = paths %>% filter(carrier %in% airlines), aes(lon, lat, group=group, color=carrier, alpha = pass, size = pass)) + 
+  geom_point(data = airports, aes(lon, lat, size = Enplanements), fill="#67a4d9", alpha = 0.75) +
+  # geom_text_repel(data = airports, aes(lon, lat, label=ports), size=2.5, color = "#cccccc") +
+  scale_size(range = c(0.15, 2)) +
+  scale_alpha(range = c(0.15, 1), limits = c(100000,2000000)) +
+  scale_color_manual(values=airline_color[airline_name %in% airlines]) +
+  coord_fixed(xlim = c(-140, -65), ylim = c(20, 50)) +
+  theme(axis.line=element_blank(),
+        axis.text.x=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks=element_blank(),
+        axis.title.x=element_blank(),
+        axis.title.y=element_blank(),
+        panel.background=element_rect(fill='transparent'),
+        # plot.background = element_rect(fill='#111111', color=NA), 
+        panel.border=element_blank(),
+        panel.grid.major=element_blank(),
+        panel.grid.minor=element_blank(),
+        # legend.position="none",
+        aspect.ratio = 0.5)
+
+  # draw_image('img/airlines-12.png', x = 0.15, y=-0.4, width = 0.7)
+
+ggsave("flights_material.svg",plot = p, height=9, width=12,dpi=300)
+```
+
+
+```{r}
+p2 <- ggplot() + 
+  geom_polygon(data=base_world, aes(long, lat, group=group), fill="#eaf0f9", color="#c9daf0") + 
+  geom_line(data = fares, aes(lon, lat, group=group, color=fare, alpha = fare, size = income)) + 
+  # geom_point(data = cities, aes(lon, lat), size=2, fill="#cccccc", color = "#eeeeee") +
+  # geom_text_repel(data = cities, aes(lon, lat, label=cities), size=2.5, color = "#cccccc") +
+  scale_size("line", range = c(0, 0.85)) +
+  scale_color_gradientn(colors = c("#fdfbe1", "#f7eb51", "#db4a3d", "#d12b64"))+
+  scale_alpha(range = c(0.25, 0.75)) +
+  coord_fixed(xlim = c(-140, -65), ylim = c(20, 50)) +
+  theme(axis.line=element_blank(),
+        axis.text.x=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks=element_blank(),
+        axis.title.x=element_blank(),
+        axis.title.y=element_blank(),
+        panel.background=element_rect(fill='transparent'),
+        # plot.background = element_rect(fill='#111111', color=NA), 
+        panel.border=element_blank(),
+        panel.grid.major=element_blank(),
+        panel.grid.minor=element_blank(),
+        # legend.position="bottom",
+        aspect.ratio = 0.5)
+
+p2
+
+ggsave("fare.svg",plot = p2, height=9, width=12,dpi=300)
+```
+
+
+```{r}
+p3 <- ggplot() + 
+  geom_polygon(data=base_world, aes(long, lat, group=group), fill="#ffffff11", color="#ffffff22") + 
+  geom_line(data = fares, aes(lon, lat, group=group, color=income, alpha = income, size = income)) + 
+  geom_point(data = cities, aes(lon, lat), size=2, fill="#cccccc", color = "#eeeeee") +
+  geom_text_repel(data = cities, aes(lon, lat, label=cities), size=2.5, color = "#cccccc") +
+  scale_size("line", range = c(0, 0.85), trans='log10') +
+  scale_color_viridis_c(option = "mako", limits = c(0, 5000000)) +
+  scale_alpha(range = c(0.25, 1), limits = c(0, 5000000)) +
+  coord_fixed(xlim = c(-140, -65), ylim = c(20, 50)) +
+  theme(axis.line=element_blank(),
+        axis.text.x=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks=element_blank(),
+        axis.title.x=element_blank(),
+        axis.title.y=element_blank(),
+        panel.background=element_rect(fill='transparent'),
+        plot.background = element_rect(fill='#111111', color=NA), 
+        panel.border=element_blank(),
+        panel.grid.major=element_blank(),
+        panel.grid.minor=element_blank(),
+        legend.position="bottom",
+        aspect.ratio = 0.5)
+
+ggdraw(p3)
+
+ggsave("income.svg",plot = p3, height=9, width=12,dpi=300)
+```
+
